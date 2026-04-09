@@ -3,85 +3,117 @@ import pandas as pd
 import numpy as np
 from st_supabase_connection import SupabaseConnection
 
-st.subheader("Practice Check-in")
-status = st.segmented_control(
-    "Your Status for April 4th:", # maybe add cols and move to the middle
-    options=["In","Out"],
-    default="Out",
-    key="attendance_status"
-)
+st.set_page_config(page_title="JVC Check-in", page_icon="🏐", layout="centered")
 
-if status == "In":
-    st.toast("Attendance logged, See you at 4 PM!", icon='🏐')
+if 'name' not in st.session_state:
+    st.session_state.name = "Eman" 
 
-st.divider()
+user_name = st.session_state.name
+st.markdown("""
+    <style>
+    .stMainBlockContainer {padding-top: 2rem;}
+    [data-testid="stMetricValue"] {font-size: 1.8rem;}
+    </style>
+    """, unsafe_allow_html=True)
 
-# if from_db_attendance > 5: st.balloons()
+# will replace with supabase later
+def get_mock_data():
+    return pd.DataFrame({
+        "Player": ["Lina", "Sara", "Mayar", "Haya", "Noor"],
+        "Sessions": [12, 8, 15, 10, 5],
+        "Status": ["Paid", "Paid", "Pending", "Paid", "Pending"]
+    })
+
 with st.sidebar:
-    st.image("https://via.placeholder.com/150", caption="Club Name") 
-    app_mode = st.radio("Go to:", ["My Check-in", "Team Analytics", "Finance Tracker"])
+    st.title("🏐 JVC Portal")
+    st.info(f"Logged in as: {st.session_state.get('name', 'Guest')}")
+    app_mode = st.radio("Menu", ["Player Check-in", "Coach Dashboard", "Fees"])
     st.divider()
-    if st.button("Log Out"):
+    if st.button("Log Out", use_container_width=True):
         st.rerun()
 
-with st.container(border=True):
-    st.write("### 🏐 Your Progress")
-    col1, col2 = st.columns(2)
-    col1.metric("Attendance", "92%", "+3%")
-    col2.metric("Fees", "Paid", "April")
+if app_mode == "Player Check-in":
 
-chart_data = pd.DataFrame({
-    "Player": ["Lina", "Sara", "Mayar", "Haya", "Noor"],
-    "Sessions": [12, 8, 15, 10, 5]
-})
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        st.header(f"Hi, {user_name}!")
+        st.markdown("🔥 **5 Practice Streak!** You're on fire.")
+    with col_b:
+        st.pills("Level", ["Varsity", "JV", "New"], default="Varsity", disabled=True)
 
+    st.info("**Coach's Note:** yessir lets go idk.")
 
-st.write("### Team Attendance (Monthly)")
-plot_colour = '#C48FDC'
-st.bar_chart(chart_data, x="Player", y="Sessions", color=plot_colour)
+    # game history
+    with st.expander("Your Game History", expanded=False):
+        # mock history data  (in future this filters supabase by user_i)d
+        history_data = pd.DataFrame({
+            "Date": ["Mar 28", "Apr 1", "Apr 4"],
+            "Opponent": ["Al-Ahli SC", "Orthodox Club", "Internal Scrimmage"],
+            "Result": ["W (3-1)", "L (0-3)", "W (2-0)"],
+            "Your Stats": ["12 Kills, 2 Aces", "5 Kills, 1 Block", "8 Kills, 4 Aces"]
+        })
+        st.table(history_data)
 
-"""conn = st.connection("supabase",type=SupabaseConnection)
+    # daily check-in
+    st.write("### Today's Practice")
+    with st.container(border=True):
+        st.write("**Thursday, April 9th @ 4:00 PM**")
+        status = st.segmented_control(
+            "Set your status:",
+            options=["In", "Late", "Out"],
+            key="att_status"
+        )
+        if st.button("Confirm Attendance", type="primary", use_container_width=True):
+            st.toast("Attendance Saved!", icon='🏐')
 
-rows = conn.query("*", table="mytable", ttl="10m").execute()
+    st.divider()
+    st.subheader("Team Leaderboard")
+    
+    t1, t2, t3 = st.columns(3)
+    t1.metric("1st", "Sara", "950 pts")
+    t2.metric("2nd", "Lina", "920 pts")
+    t3.metric("3rd", "Mayar", "880 pts")
+    
+    with st.expander("Vertical Jump Leaderboard"): # or sth idk but the page feels too empty
+        jump_df = pd.DataFrame({
+            "Player": ["Lina", "Sara", "Noor"],
+            "Max Reach": ["250 cm", "242 cm", "238 cm"]
+        })
+        st.dataframe(jump_df, use_container_width=True, hide_index=True)
 
-for row in rows.data:
-    st.write(f"{row['name']} has a :{row['pet']}:")
-"""
-user_name = st.text_input("enter your name", key = "name")
+    st.subheader("Attendance Chart")
 
-add_selectbox = st.sidebar.selectbox(
-    'How would you like to be contacted?',
-    ('Email', 'Home phone', 'Mobile phone') # will delete, only exp sidebar
-)
+    trend_data = pd.DataFrame({
+        "Month": ["Jan", "Feb", "Mar", "Apr"],
+        "Attendance %": [70, 85, 82, 95],
+        "Target": [90, 90, 90, 90]
+    })
 
-add_slider = st.sidebar.slider( # will delete
-    'Select a range of values',
-    0.0, 100.0, (25.0, 75.0)
-)
+    st.line_chart(trend_data, x="Month", y=["Attendance %", "Target"], color=["#C48FDC", "#46B290"])
+    st.caption("Purple: Your Attendance | Green: Team Target")
 
-left_column, middle_column, right_column = st.columns(3) # no need currently
-middle_column.button('Press me!')
+elif app_mode == "Coach Dashboard":
+    st.header("Coach's Overview")
+    df = get_mock_data()
+    
+    c1, c2 = st.columns(2)
+    c1.metric("Expected Today", "14 Players")
+    c2.metric("Attendance Rate", "88%")
+    
+    st.write("### Attendance Distribution")
+    st.bar_chart(df, x="Player", y="Sessions", color="#46B290")
+    
+    st.write("### Full Roster")
+    st.dataframe(df, use_container_width=True)
 
-with right_column:
-    chosen = st.radio(
-        'Sorting hat',
-        ("Gryffindor", "Ravenclaw", "Hufflepuff", "Slytherin"))
-    st.write(f"You are in {chosen} house!")
+elif app_mode == "Fees":
+    st.header("Team Fund")
+    df = get_mock_data()
+    
+    with st.container(border=True):
+        st.write("Your April Fees: **Paid**")
+    
+    st.write("### Monthly Collection")
+    st.table(df[["Player", "Status"]])
 
-st.header(f"Hi,{user_name}")
-st.divider()
-prac_status = ["Out", "In"]
-game_status = ["Out", "In", "Arrive Late", "Leave Early"]
-
-'Are you going to attend April 4th practice?'
-player_status = st.selectbox("Player's Status", prac_status)
-
-color=st.color_picker("Pikc", "#46B290")
-
-df = pd.DataFrame(np.random.randn(20,3), columns=['x', 'y', 'z'])
-
-if df not in st.session_state:
-    st.session_state.df = df
-st.scatter_chart(st.session_state.df,x="x", y="y", color=color)
-# data for all users > cache a function that retrieves that data
-# personal data > save in session state
+st.caption("v1.0-alpha")
