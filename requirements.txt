@@ -1,2 +1,5 @@
 streamlit
 st-supabase-connection==2.1.3
+pandas
+numpy
+plotly
