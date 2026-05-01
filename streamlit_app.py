@@ -2,206 +2,273 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
+from st_supabase_connection import SupabaseConnection
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 
-st.set_page_config(page_title="JVC // Team Hub", page_icon="🏐", layout="wide")
+conn = st.connection(
+    "supabase", 
+    type=SupabaseConnection,
+    url=st.secrets["SUPABASE_URL"],
+    key=st.secrets["SUPABASE_KEY"]
+)
+ 
+# 3 tables are used: players, attendance, and player_stats
+
+def load_players():
+    try:
+        query = conn.table("players").select("name").order("name").execute()
+        if query.data:
+            return [row["name"] for row in query.data]
+        return []
+    except Exception as e:
+        st.error(f"Error loading players: {e}")
+        return []
+
+def add_player(name, position): # to the players db, only coach can do
+    try:
+        conn.table("players").insert({
+            "name": name,
+            "position": position
+        }).execute()
+        return True
+    except Exception as e:
+        st.error(f"Error adding player: {e}")
+        return False
+
+def save_attendance(player_name, status):
+    try:
+        conn.table("attendance").insert({
+            "player": player_name,
+            "status": status,
+            "date": datetime.now().strftime("%b %d")
+        }).execute()
+        return True
+    except Exception as e:
+        st.error(f"DB Error: {e}")
+        return False
+
+def load_attendance():
+    try:
+        query = conn.table("attendance").select("*").execute()
+        df = pd.DataFrame(query.data)
+        if df.empty:
+            return pd.DataFrame(columns=["date", "player", "status", "created_at"])
+        return df
+    except:
+        return pd.DataFrame(columns=["date", "player", "status", "created_at"])
+
+def calculate_streaks(df):
+    if df.empty or 'status' not in df.columns or 'player' not in df.columns:
+        return pd.DataFrame(columns=["Player", "Max Streak"])
+    
+    streaks = []
+    for player in df['player'].unique():
+        p_df = df[df['player'] == player]
+        if 'created_at' in p_df.columns:
+            p_df = p_df.sort_values('created_at')
+        
+        max_streak = 0
+        current_streak = 0
+        for status in p_df['status']:
+            if status == "Available":
+                current_streak += 1
+                if current_streak > max_streak:
+                    max_streak = current_streak
+            else:
+                current_streak = 0
+        streaks.append({"Player": player, "Max Streak": max_streak})
+        
+    return pd.DataFrame(streaks).sort_values(by="Max Streak", ascending=False).reset_index(drop=True)
+
+def save_stats(player_name, h, s, p, sv, d):
+    try:
+        data = {"player": player_name, "hitting": h, "setting": s, "passing": p, "serving": sv, "defense": d}
+        conn.table("player_stats").upsert(data, on_conflict="player").execute()
+        return True
+    except:
+        return False
+
+def load_player_stats(player_name):
+    try:
+        query = conn.table("player_stats").select("*").eq("player", player_name).execute()
+        if query.data: return query.data[0]
+        return {"hitting": 3, "setting": 3, "passing": 3, "serving": 3, "defense": 3}
+    except:
+        return {"hitting": 3, "setting": 3, "passing": 3, "serving": 3, "defense": 3}
+
+def create_pdf(df):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    elements = [Paragraph("JVC Attendance Report", styles['Title'])]
+    data = [df.columns.to_list()] + df.values.tolist()
+    t = Table(data)
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#059669")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
+    elements.append(t)
+    doc.build(elements)
+    return buffer.getvalue()
+
+st.set_page_config(page_title="JVC // Team Hub", layout="wide")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
-    
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    .brand-text { font-weight: 800; font-size: 2.2rem; color: #059669; }
     
-    .player-card {
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        padding: 1.5rem;
-        border-radius: 16px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-        margin-bottom: 1rem;
+    /* Uniform Clickable Color: Emerald Green */
+    .stButton>button, .stDownloadButton>button {
+        background-color: #059669 !important;
+        color: white !important;
+        border: none !important;
+    }
+    .stButton>button:hover, .stDownloadButton>button:hover {
+        background-color: #047857 !important;
     }
     
-    .stSegmentedControl { background: #f9fafb; padding: 10px; border-radius: 12px; }
-    
-    .brand-text {
-        font-weight: 800;
-        font-size: 2.2rem;
-        letter-spacing: -2px;
-        background: linear-gradient(90deg, #111827 0%, #3b82f6 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+    /* Segmented Control and Radio Buttons Green Override */
+    div[data-baseweb="segmented-control"] button[aria-checked="true"] {
+        background-color: #059669 !important;
+        color: white !important;
     }
-    
-    div[data-testid="stMetricValue"] {
-        font-weight: 800;
-        color: #111827;
-        letter-spacing: -1px;
+    div[role="radiogroup"] label > div:first-child[data-checked="true"] {
+        background-color: #059669 !important;
+        border-color: #059669 !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-def get_skill_data():
-    return pd.DataFrame(dict(
-        r=[4, 3, 5, 4, 2],
-        theta=['Hitting', 'Setting', 'Passing', 'Serving', 'Defense']
-    ))
-
 with st.sidebar:
     st.markdown("<h2 class='brand-text'>JVC</h2>", unsafe_allow_html=True)
-    st.caption("VOLLEYBALL PERFORMANCE")
     st.divider()
-    nav = st.radio("Menu", ["Dashboard", "My Stats", "Team Feed", "Admin"], label_visibility="collapsed")
+    
+    players_list = load_players()
+    
+    if not players_list:
+        st.warning("No players found. Admin must add profiles.")
+        current_user = None
+    else:
+        current_user = st.selectbox("Active Player", players_list)
+        
+    nav = st.radio("Menu", ["Dashboard", "My Stats", "Admin"], label_visibility="collapsed")
+
+# Stop rendering standard views if no players exist yet
+if not current_user and nav != "Admin":
+    st.stop()
 
 if nav == "Dashboard":
-    col_h1, col_h2 = st.columns([2, 1])
-    with col_h1:
-        st.markdown(f"<h1>Welcome back, player. <span style='color:#3b82f6'>Ready to work?</span></h1>", unsafe_allow_html=True)
-        st.markdown("##### Next Session: Today @ 7:00 PM • Arena B")
+    st.markdown(f"<h1>Welcome back, {current_user.split()[0]}.</h1>", unsafe_allow_html=True)
     
-    with col_h2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.container(border=True):
-            st.write("**12 Day Streak**")
-            st.progress(0.8, text="3 sessions to next level")
-
-    st.divider()
-
     c1, c2 = st.columns([1, 1.5], gap="large")
-    
     with c1:
         st.markdown("### Check-in")
-        status = st.segmented_control(
-            "Your Status", ["Available", "Running Late", "Unavailable"],
-            selection_mode="single", default="Available"
-        )
-        note = st.text_area("Note to Coach", placeholder="Add any details regarding your status.")
-        if st.button("Confirm Attendance", use_container_width=True, type="primary"):
-            st.toast("Status sent to Coach.")
+        status = st.segmented_control("Your Status", ["Available", "Unavailable"], default="Available")
+        if st.button("Confirm Attendance", use_container_width=True):
+            if save_attendance(current_user, status):
+                st.toast(f"Logged for {current_user}")
 
     with c2:
         st.markdown("### Your Skill Profile")
-        df_skill = get_skill_data()
+        stats = load_player_stats(current_user)
+        df_skill = pd.DataFrame(dict(
+            r=[stats['hitting'], stats['setting'], stats['passing'], stats['serving'], stats['defense']],
+            theta=['Hitting', 'Setting', 'Passing', 'Serving', 'Defense']
+        ))
         fig = px.line_polar(df_skill, r='r', theta='theta', line_close=True)
-        fig.update_traces(fill='toself', line_color='#3b82f6')
-        fig.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 5])),
-            showlegend=False,
-            margin=dict(l=40, r=40, t=20, b=20),
-            height=300
+        fig.update_traces(fill='toself', line_color='#059669')
+        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 5])), showlegend=False, height=300)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("<h2 class='brand-text'>Attendance Leaderboard</h2>", unsafe_allow_html=True)
+    db_data = load_attendance()
+    if not db_data.empty:
+        streak_df = calculate_streaks(db_data)
+        st.dataframe(
+            streak_df, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={"Max Streak": st.column_config.NumberColumn("Max Streak", alignment="right")}
         )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-    st.divider()
-
-    st.markdown("### Attendance Leaderboard")
-    leaderboard_df = pd.DataFrame({
-        "Player": ["heba T.", "player R.", "Lina M.", "Noor H.", "Sara K.", "Haya Z.", "Mayar A."],
-        "Streak": [15, 12, 11, 8, 8, 7, 5],
-        "Consistency": ["100%", "98%", "95%", "90%", "90%", "85%", "80%"]
-    }).sort_values(by="Streak", ascending=False)
-
-    st.dataframe(
-        leaderboard_df,
-        hide_index=True,
-        use_container_width=True
-    )
 
 elif nav == "Admin":
-    st.markdown("<h1 class='brand-text'>Command Center</h1>", unsafe_allow_html=True)
-
-    with st.container(border=True):
-        col_title, col_pdf = st.columns([2, 1])
-        with col_title:
-            st.markdown(f"### Today's Attendees ({datetime.now().strftime('%b %d')})")
-            st.caption("Auto-filtered: Present & Late players only")
+    st.markdown("<h1 class='brand-text'>Coach Admin</h1>", unsafe_allow_html=True)
+    db_data = load_attendance()
+    
+    # upcoming session attendance 
+    if not db_data.empty:
+        latest_date = db_data.iloc[-1]['date'] 
+        upcoming_data = db_data[db_data['date'] == latest_date]
+        available_players = upcoming_data[upcoming_data['status'] == 'Available']['player'].tolist()
         
-        with col_pdf:
-            st.button("Download Master History (PDF)", use_container_width=True)
+        st.markdown(f"### Upcoming Session: {latest_date}")
+        col_count, col_names = st.columns([1, 4])
+        with col_count:
+            st.metric("Total Attending", len(available_players))
+        with col_names:
+            if available_players:
+                st.write("**Confirmed Players:**")
+                st.write(", ".join(available_players))
+            else:
+                st.write("**Confirmed Players:**\nNo players confirmed yet.")
+        st.divider()
 
-        todays_names = ["Lina M.", "heba T.", "player R.", "Haya Z.", "Noor H.", "Sara K.", "Mayar A."]
-        st.code(", ".join(todays_names), language=None)
-        st.caption("Copy names for squad list.")
+    tab1, tab2, tab3 = st.tabs(["Attendance & PDF", "Insert Player Stats", "Manage Roster"])
+    
+    with tab1:
+        if not db_data.empty:
+            st.download_button("Generate Attendance PDF", data=create_pdf(db_data), file_name="attendance.pdf", mime="application/pdf")
+            pivot_df = db_data.pivot_table(index='player', columns='date', values='status', aggfunc='first').fillna("Unavailable")
+            
+            def color_matrix(val):
+                if val == 'Available': return 'background-color: #bbf7d0; color: #166534'
+                elif val == 'Unavailable': return 'background-color: #fecaca; color: #991b1b'
+                return ''
+            
+            styled_df = pivot_df.style.map(color_matrix) if hasattr(pivot_df.style, 'map') else pivot_df.style.applymap(color_matrix)
+            st.dataframe(styled_df, use_container_width=True)
 
-    st.markdown("### Check-in Details")
-    roster_status = pd.DataFrame({
-        "Player": ["Lina M.", "heba T.", "player R.", "Haya Z.", "Noor H.", "Sara K.", "Mayar A.", "Noor D.", "Tala S."],
-        "Status": ["In", "In", "Running Late", "In", "In", "Running Late", "In", "Out", "Out"],
-        "Note": ["Ready!", "Coming from work", "Traffic", "", "Recovery", "5 mins late", "", "Academic", "Family"],
-        "Arrival": ["3:45 PM", "3:50 PM", "4:15 PM", "3:55 PM", "3:58 PM", "4:10 PM", "3:40 PM", "-", "-"]
-    })
+    with tab2:
+        if players_list:
+            target = st.selectbox("Select Player", players_list)
+            cur = load_player_stats(target)
+            col1, col2 = st.columns(2)
+            with col1:
+                h = st.slider("Hitting", 1, 5, int(cur['hitting']))
+                s = st.slider("Setting", 1, 5, int(cur['setting']))
+                p = st.slider("Passing", 1, 5, int(cur['passing']))
+            with col2:
+                sv = st.slider("Serving", 1, 5, int(cur['serving']))
+                d = st.slider("Defense", 1, 5, int(cur['defense']))
+            if st.button("Update Stats"):
+                if save_stats(target, h, s, p, sv, d): st.success("Updated")
+        else:
+            st.info("Add players in the Manage Roster tab first.")
 
-    st.dataframe(
-        roster_status,
-        column_config={
-            "Status": st.column_config.SelectboxColumn("Attendance", options=["In", "Out", "Running Late"]),
-            "Player": st.column_config.TextColumn("Player Name", width="medium"),
-            "Note": st.column_config.TextColumn("Notes", width="large"),
-        },
-        hide_index=True,
-        use_container_width=True
-    )
+    with tab3:
+        st.subheader("Add New Player")
+        with st.form("new_player_form"):
+            new_name = st.text_input("Full Name / Display Name")
+            new_pos = st.selectbox("Position", ["None", "Outside Hitter", "Middle Blocker", "Setter", "Libero", "Opposite", "Defensive Specialist"])
 
-    st.divider()
-    st.markdown("### Team Presence Pattern")
-    dates = [f"Apr {i}" for i in range(10, 25)]
-    players = [f"Player {i}" for i in range(1, 26)]
-    data = np.random.choice([0, 1], size=(25, 15), p=[0.2, 0.8])
-    fig_heat = px.imshow(data, x=dates, y=players, color_continuous_scale=[[0, '#f3f4f6'], [1, '#3b82f6']])
-    fig_heat.update_coloraxes(showscale=False)
-    fig_heat.update_layout(height=500, margin=dict(l=10, r=10, t=10, b=10))
-    st.plotly_chart(fig_heat, use_container_width=True)
+            submitted = st.form_submit_button("Create Profile")
+            if submitted:
+                if new_name:
+                    if add_player(new_name, new_pos):
+                        st.success(f"Added {new_name} to the roster! Refresh to see them in the sidebar.")
+                        st.rerun() # Automatically refresh the app to update the sidebar
+                else:
+                    st.error("Player name is required.")
 
 elif nav == "My Stats":
-    st.markdown("## Attendance History")
-    history = pd.DataFrame({
-        "Date": ["April 14", "April 12", "April 10", "April 07", "April 05"],
-        "Status": ["Attended", "Attended", "Missed", "Attended", "Late"]
-    })
-    st.table(history)
-
-elif nav == "Team Feed":
-    st.markdown("<h1 class='brand-text'>Team Pulse</h1>", unsafe_allow_html=True)
-    
-    with st.container(border=True):
-        st.markdown("### Coach's Bulletin")
-        st.info("Practice Update: Focusing on 5-1 rotation drills today. Bring your knee pads. - Coach")
-        st.caption("Posted 2 hours ago")
-
-    st.divider()
-    col_lead, col_achieve = st.columns([1, 1], gap="large")
-
-    with col_lead:
-        st.markdown("### Leaderboard")
-        leader_data = pd.DataFrame({
-            "Player": ["heba T.", "player R.", "Lina M.", "Noor H.", "Sara K."],
-            "Streak": [15, 12, 8, 5, 4],
-            "Rate": [100, 95, 92, 88, 85]
-        })
-        for _, row in leader_data.iterrows():
-            c_name, c_rate = st.columns([2, 1])
-            c_name.write(f"**{row['Player']}** ({row['Streak']})")
-            c_rate.progress(row['Rate']/100)
-
-    with col_achieve:
-        st.markdown("### Activity Feed")
-        activities = [
-            {"player": "Lina M.", "action": "Reached Level 4", "tag": "SKILL UP"},
-            {"player": "heba T.", "action": "30-Day Streak", "tag": "RELIABILITY"},
-        ]
-        for item in activities:
-            with st.container(border=True):
-                col_text, col_tag = st.columns([4, 1])
-                with col_text:
-                    st.markdown(f"**{item['player']}** — {item['action']}")
-                with col_tag:
-                    st.markdown(f"<span style='color: #3b82f6; font-size: 10px; font-weight: 800;'>{item['tag']}</span>", unsafe_allow_html=True)
-
-    st.divider()
-    st.markdown("### Weekly Team Synergy")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Avg. Attendance", "88%", "+2%")
-    with m2:
-        st.write("Team Energy")
-        st.markdown("<div style='background-color: #f0fdf4; color: #166534; padding: 4px 12px; border-radius: 9999px; font-size: 14px; font-weight: 600; display: inline-block; border: 1px solid #bbf7d0;'>OPTIMAL</div>", unsafe_allow_html=True)
-    m3.metric("Drill Completion", "94%", "5%")
+    st.markdown(f"<h2>History: {current_user}</h2>", unsafe_allow_html=True)
+    db_data = load_attendance()
+    st.dataframe(db_data[db_data['player'] == current_user], use_container_width=True)
