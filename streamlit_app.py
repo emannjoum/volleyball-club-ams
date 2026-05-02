@@ -16,7 +16,7 @@ conn = st.connection(
     url=st.secrets.connections.supabase.url, 
     key=st.secrets.connections.supabase.key
 )
- 
+
  
 # 3 tables are used: players, attendance, and player_stats
 
@@ -149,11 +149,52 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.markdown("<h2 class='brand-text'>JVC</h2>", unsafe_allow_html=True)
+    # Header: Clean JVC text with a subtle accent and small margin
+    st.markdown(
+        """
+        <div style='display: flex; flex-direction: column;'>
+            <h2 style='color: #059669; font-weight: 800; margin: 0; padding: 0;'>JVC</h2>
+            <span style='color: #6b7280; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;'>Team Hub</span>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+    
     st.divider()
     
-    players_list = load_players()
+    # Image Container: Centers the image and tightens the spacing below it
+    st.markdown(
+        """
+        <style>
+        .sidebar-logo-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 2px;
+        }
+        /* Pull the second divider closer to the image */
+        [data-testid="stImage"] {
+            margin-bottom: -15px; 
+        }
+        /* Custom spacing to pull the dividers closer to the components */
+        hr {
+            margin-top: 8px !important;
+            margin-bottom: 8px !important;
+            border-color: #e5e7eb !important;
+        }
+        </style>
+        <div class='sidebar-logo-container'>
+        """, 
+        unsafe_allow_html=True
+    )
     
+    st.image("jvc_logo_trans.png", width=190)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    #st.divider()
+
+    players_list = load_players()
+        
     if not players_list:
         st.warning("No players found. Admin must add profiles.")
         current_user = None
@@ -272,4 +313,12 @@ elif nav == "Admin":
 elif nav == "My Stats":
     st.markdown(f"<h2>History: {current_user}</h2>", unsafe_allow_html=True)
     db_data = load_attendance()
-    st.dataframe(db_data[db_data['player'] == current_user], use_container_width=True)
+    user_data = db_data[db_data['player'] == current_user]
+    
+    selected_cols = ['date', 'status'] 
+    
+    st.dataframe(
+        user_data[selected_cols], 
+        use_container_width=True, 
+        hide_index=True
+    )
