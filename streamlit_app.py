@@ -13,9 +13,10 @@ from reportlab.lib import colors
 conn = st.connection(
     "supabase", 
     type=SupabaseConnection,
-    url=st.secrets["SUPABASE_URL"],
-    key=st.secrets["SUPABASE_KEY"]
+    url=st.secrets.connections.supabase.url, 
+    key=st.secrets.connections.supabase.key
 )
+ 
  
 # 3 tables are used: players, attendance, and player_stats
 
