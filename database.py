@@ -124,16 +124,42 @@ def load_attendance():
         return df
     except: return pd.DataFrame(columns=["date", "player", "status", "created_at"])
 
+def get_schedule_overrides():
+    try:
+        query = conn.table("schedule_overrides").select("*").execute()
+        return query.data if query.data else []
+    except: return []
+
+def add_schedule_override(date_str, status):
+    try:
+        conn.table("schedule_overrides").upsert({"session_date": date_str, "status": status}).execute()
+        return True
+    except: return False
+
+def delete_schedule_override(date_str):
+    try:
+        conn.table("schedule_overrides").delete().eq("session_date", date_str).execute()
+        return True
+    except: return False
+
 def save_stats(player_name, h, s, p, sv, d):
     try:
         data = {"player": player_name, "hitting": h, "setting": s, "passing": p, "serving": sv, "defense": d}
-        conn.table("player_stats").upsert(data, on_conflict="player").execute()
+        conn.table("player_stats_history").insert(data).execute()
         return True
     except: return False
 
 def load_player_stats(player_name):
     try:
-        query = conn.table("player_stats").select("*").eq("player", player_name).execute()
-        if query.data: return query.data[0]
+        query = conn.table("player_stats_history").select("*").eq("player", player_name).execute()
+        if query.data: 
+            df = pd.DataFrame(query.data)
+            return {
+                "hitting": round(df["hitting"].mean(), 1),
+                "setting": round(df["setting"].mean(), 1),
+                "passing": round(df["passing"].mean(), 1),
+                "serving": round(df["serving"].mean(), 1),
+                "defense": round(df["defense"].mean(), 1)
+            }
         return {"hitting": 3, "setting": 3, "passing": 3, "serving": 3, "defense": 3}
     except: return {"hitting": 3, "setting": 3, "passing": 3, "serving": 3, "defense": 3}

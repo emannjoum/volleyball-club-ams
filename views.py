@@ -3,12 +3,13 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import database as db
-from utils import get_next_session_date, calculate_streaks, create_pdf
+from utils import get_next_session_date, get_upcoming_sessions_list, calculate_streaks, create_pdf
 
 def render_player_dashboard(current_user, radar_label_color):
     st.markdown(f"<h1 class='gradient-text'>Welcome, {current_user.split()[0]}</h1>", unsafe_allow_html=True)
     
-    next_session = get_next_session_date()
+    overrides = db.get_schedule_overrides()
+    next_session = get_next_session_date(overrides)
     db_data = db.load_attendance()
     stats = db.load_player_stats(current_user)
     
@@ -27,7 +28,7 @@ def render_player_dashboard(current_user, radar_label_color):
         st.markdown(f"<div class='metric-card'><p style='margin:0; font-size: 0.9rem; font-weight: bold; text-transform: uppercase;'>Remaining Sessions</p><h2 style='color: {credit_color} !important; margin:0; font-weight: 900;'>{current_credits} Sessions</h2></div>", unsafe_allow_html=True)
         
     with col3:
-        st.markdown(f"<div class='metric-card'><p style='margin:0; font-size: 0.9rem; font-weight: bold; text-transform: uppercase;'>Coach's Rating</p><h2 style='margin:0; font-weight: 900;'>Top: {top_skill}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><p style='margin:0; font-size: 0.9rem; font-weight: bold; text-transform: uppercase;'>Avg Top Skill</p><h2 style='margin:0; font-weight: 900;'>{top_skill}</h2></div>", unsafe_allow_html=True)
 
     c1, c2 = st.columns([1, 1.5], gap="large")
     
@@ -50,7 +51,7 @@ def render_player_dashboard(current_user, radar_label_color):
                 st.rerun()
 
         st.divider()
-        st.markdown("### Top Players (Streaks)")
+        st.markdown("### Players Attendace Streaks")
         if not db_data.empty:
             streak_df = calculate_streaks(db_data)
             max_val = int(streak_df['Max Streak'].max()) if not streak_df.empty else 10
@@ -86,8 +87,25 @@ def render_player_dashboard(current_user, radar_label_color):
 def render_player_stats(current_user, grid_empty):
     st.markdown(f"<h1 class='gradient-text'>Season History: {current_user}</h1>", unsafe_allow_html=True)
     db_data = db.load_attendance()
+    
     if not db_data.empty:
         user_data = db_data[db_data['player'] == current_user].copy()
+        
+        user_data['Month'] = user_data['date'].apply(lambda x: x.split(' ')[0])
+        # Extract unique months in chronological order, then reverse so the newest is first
+        unique_months = list(dict.fromkeys(user_data['Month']))
+        unique_months.reverse() 
+        available_months = ["All Time"] + unique_months
+        
+        # Default index to 1 (the newest month) if data exists
+        default_idx = 1 if len(available_months) > 1 else 0
+        
+        filter_col, _ = st.columns([1, 2])
+        with filter_col:
+            selected_month = st.selectbox("Filter History by Month", available_months, index=default_idx)
+            
+        if selected_month != "All Time":
+            user_data = user_data[user_data['Month'] == selected_month]
         
         total_sessions = len(user_data)
         attended = len(user_data[user_data['status'] == 'Available'])
@@ -114,26 +132,25 @@ def render_player_stats(current_user, grid_empty):
 
         st.markdown("### Attendance Activity Log")
         sorted_data = user_data.sort_values('created_at') if 'created_at' in user_data.columns else user_data
-
         squares_html = "<div style='display: flex; flex-wrap: wrap; gap: 4px; padding-top: 10px;'>"
         for idx, row in sorted_data.iterrows():
             color = "#166534" if row['status'] == 'Available' else grid_empty
             squares_html += f"<div class='activity-square' title='{row['date']} - {row['status']}' style='width: 18px; height: 18px; background-color: {color}; border-radius: 3px;'></div>"
         squares_html += "</div>"
         st.markdown(squares_html, unsafe_allow_html=True)
-
     else:
         st.info("No attendance records found.")
 
 def render_admin():
     st.markdown("<h1 class='gradient-text'>Coach Admin</h1>", unsafe_allow_html=True)
     
-    upcoming_date = get_next_session_date()
+    overrides = db.get_schedule_overrides()
+    upcoming_date = get_next_session_date(overrides)
     db_data = db.load_attendance()
     players_list = db.load_players()
     
-    with st.expander(f"Attendance Override - {upcoming_date}", expanded=False):
-        st.write("Manually flip a player's attendance. Session fees adjust automatically.")
+    with st.expander(f"Floor Attendance Override - {upcoming_date}", expanded=False):
+        st.write("Manually flip a player's attendance on the floor. Session fees adjust automatically.")
         if players_list:
             override_cols = st.columns(4)
             for i, p in enumerate(players_list):
@@ -168,32 +185,53 @@ def render_admin():
     
     with tab1:
         if not db_data.empty:
-            pivot_df = db_data.pivot_table(index='player', columns='date', values='status', aggfunc='first').fillna("Unavailable").reset_index()
-            st.download_button("Download Clean Attendance PDF", data=create_pdf(pivot_df, "JVC Attendance Report"), file_name="attendance_report.pdf", mime="application/pdf")
+            db_data['Month'] = db_data['date'].apply(lambda x: x.split(' ')[0])
             
-            def color_matrix(val):
-                if val == 'Available': return 'background-color: #bbf7d0; color: #166534'
-                elif val == 'Unavailable': return 'background-color: #fecaca; color: #991b1b'
-                return ''
+            # Extract unique months in chronological order, then reverse so newest is first
+            unique_months = list(dict.fromkeys(db_data['Month']))
+            unique_months.reverse()
+            available_months = ["All Time"] + unique_months
             
-            display_df = pivot_df.set_index('player')
-            styled_df = display_df.style.map(color_matrix) if hasattr(display_df.style, 'map') else display_df.style.applymap(color_matrix)
-            st.dataframe(styled_df, use_container_width=True)
+            default_idx = 1 if len(available_months) > 1 else 0
+            
+            matrix_col, _ = st.columns([1, 2])
+            with matrix_col:
+                selected_matrix_month = st.selectbox("Filter Matrix by Month", available_months, index=default_idx)
+                
+            filtered_db = db_data if selected_matrix_month == "All Time" else db_data[db_data['Month'] == selected_matrix_month]
+            
+            if not filtered_db.empty:
+                pivot_df = filtered_db.pivot_table(index='player', columns='date', values='status', aggfunc='first').fillna("Unavailable").reset_index()
+                st.download_button("Download Clean Attendance PDF", data=create_pdf(pivot_df, f"JVC Attendance Report - {selected_matrix_month}"), file_name="attendance_report.pdf", mime="application/pdf")
+                
+                def color_matrix(val):
+                    if val == 'Available': return 'background-color: #bbf7d0; color: #166534'
+                    elif val == 'Unavailable': return 'background-color: #fecaca; color: #991b1b'
+                    return ''
+                
+                display_df = pivot_df.set_index('player')
+                styled_df = display_df.style.map(color_matrix) if hasattr(display_df.style, 'map') else display_df.style.applymap(color_matrix)
+                st.dataframe(styled_df, use_container_width=True)
+            else:
+                st.info("No records for this month.")
 
     with tab2:
         if players_list:
             target = st.selectbox("Select Player", players_list)
-            cur = db.load_player_stats(target)
+            cur_avg = db.load_player_stats(target)
+            st.write(f"Current Historical Averages: Hitting ({cur_avg['hitting']}) | Setting ({cur_avg['setting']}) | Passing ({cur_avg['passing']}) | Serving ({cur_avg['serving']}) | Defense ({cur_avg['defense']})")
+            
             col1, col2 = st.columns(2)
             with col1:
-                h = st.slider("Hitting", 1, 5, int(cur['hitting']))
-                s = st.slider("Setting", 1, 5, int(cur['setting']))
-                p = st.slider("Passing", 1, 5, int(cur['passing']))
+                h = st.slider("New Hitting Rating", 1, 5, 3)
+                s = st.slider("New Setting Rating", 1, 5, 3)
+                p = st.slider("New Passing Rating", 1, 5, 3)
             with col2:
-                sv = st.slider("Serving", 1, 5, int(cur['serving']))
-                d = st.slider("Defense", 1, 5, int(cur['defense']))
-            if st.button("Update Stats"):
-                if db.save_stats(target, h, s, p, sv, d): st.success("Updated Successfully.")
+                sv = st.slider("New Serving Rating", 1, 5, 3)
+                d = st.slider("New Defense Rating", 1, 5, 3)
+            if st.button("Log New Evaluation"):
+                if db.save_stats(target, h, s, p, sv, d): 
+                    st.success("New evaluation logged. Radar average updated.")
         else:
             st.info("Add players in the Manage Roster tab first.")
 
@@ -263,18 +301,11 @@ def render_finances(show_history_report):
         if players_list:
             with st.form("payment_form"):
                 target_player = st.selectbox("Select Player", players_list)
-                plan_type = st.radio("Payment Plan Type", ["Monthly (8 Sessions)", "Daily (1 Session)", "Custom Amount"])
-                
-                custom_amount = 0
-                if plan_type == "Custom Amount":
-                    custom_amount = st.number_input("Enter custom amount of sessions", min_value=-50, max_value=50, value=0)
+                plan_type = st.radio("Payment Plan Type", ["Monthly (8 Sessions)", "Daily (1 Session)", "Custom Number"])
+                custom_amount = st.number_input("Enter custom number of sessions", min_value=-50, max_value=50, value=0)
                 
                 if st.form_submit_button("Confirm Payment"):
-                    sessions_to_add = 0
-                    if plan_type == "Monthly (8 Sessions)": sessions_to_add = 8
-                    elif plan_type == "Daily (1 Session)": sessions_to_add = 1
-                    else: sessions_to_add = custom_amount
-                        
+                    sessions_to_add = 8 if plan_type == "Monthly (8 Sessions)" else (1 if plan_type == "Daily (1 Session)" else custom_amount)
                     if db.update_player_credits(target_player, sessions_to_add, plan_type):
                         st.success(f"Payment recorded. {sessions_to_add} session(s) added to {target_player}.")
                         st.rerun()
@@ -282,7 +313,8 @@ def render_finances(show_history_report):
             st.info("No players available.")
 
     with col2:
-        upcoming_date = get_next_session_date()
+        overrides = db.get_schedule_overrides()
+        upcoming_date = get_next_session_date(overrides)
         st.subheader(f"Payments for {upcoming_date}")
         
         try:
@@ -328,13 +360,7 @@ def render_finances(show_history_report):
             df_debt["Sessions Owed"] = df_debt["Sessions Owed"].abs() 
             st.dataframe(df_debt, use_container_width=True, hide_index=True)
             
-            st.download_button(
-                label="Download Debt Report (PDF)", 
-                data=create_pdf(df_debt, "JVC - Players In Debt Report"), 
-                file_name=f"JVC_Debt_Report_{datetime.now().strftime('%b_%d')}.pdf", 
-                mime="application/pdf",
-                use_container_width=True
-            )
+            st.download_button("Download Debt Report (PDF)", data=create_pdf(df_debt, "JVC - Players In Debt Report"), file_name=f"JVC_Debt_Report_{datetime.now().strftime('%b_%d')}.pdf", mime="application/pdf", use_container_width=True)
         else:
             st.success("Everyone is paid up.")
             
@@ -343,12 +369,50 @@ def render_finances(show_history_report):
             st.markdown("### Payment History")
             if not hist_df.empty:
                 st.dataframe(hist_df, use_container_width=True, hide_index=True)
-                st.download_button(
-                    label="Download Payment History (PDF)", 
-                    data=create_pdf(hist_df, "JVC - Payment Transaction Log"), 
-                    file_name=f"JVC_Payment_History_{datetime.now().strftime('%b_%d')}.pdf", 
-                    mime="application/pdf",
-                    use_container_width=True
-                )
+                st.download_button("Download Payment History (PDF)", data=create_pdf(hist_df, "JVC - Payment Transaction Log"), file_name=f"JVC_Payment_History_{datetime.now().strftime('%b_%d')}.pdf", mime="application/pdf", use_container_width=True)
             else:
                 st.info("No payment transactions recorded yet.")
+
+def render_session_manager():
+    st.markdown("<h1 class='gradient-text'>Session Manager</h1>", unsafe_allow_html=True)
+    st.write("Control the team's schedule. Auto-generated Sunday/Thursday practices will appear here. You can cancel them or add custom match/practice dates.")
+    
+    overrides = db.get_schedule_overrides()
+    upcoming_list = get_upcoming_sessions_list(overrides)
+    
+    col1, col2 = st.columns(2, gap="large")
+    
+    with col1:
+        st.markdown("### Upcoming Schedule")
+        if upcoming_list:
+            for d in upcoming_list[:7]:
+                c1, c2 = st.columns([3, 1])
+                c1.markdown(f"**{d}**")
+                if c2.button("Cancel", key=f"cancel_{d}"):
+                    if db.add_schedule_override(d, "Cancelled"):
+                        st.rerun()
+        else:
+            st.info("No upcoming sessions found.")
+            
+        st.divider()
+        st.markdown("### Add Custom Session")
+        st.write("Need a practice on a Tuesday? Add it here.")
+        custom_date = st.date_input("Select Date")
+        if st.button("Add Session"):
+            date_str = custom_date.strftime("%b %d")
+            if db.add_schedule_override(date_str, "Added"):
+                st.success(f"Added {date_str} to the schedule.")
+                st.rerun()
+
+    with col2:
+        st.markdown("### Cancelled Sessions")
+        cancelled_list = [x['session_date'] for x in overrides if x['status'] == 'Cancelled']
+        if cancelled_list:
+            for c in cancelled_list:
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"~~{c}~~")
+                if c2.button("Restore", key=f"restore_{c}"):
+                    if db.delete_schedule_override(c):
+                        st.rerun()
+        else:
+            st.write("No sessions currently cancelled.")

@@ -6,14 +6,38 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-def get_next_session_date():
+def get_upcoming_sessions_list(overrides_data):
+    added = [x['session_date'] for x in overrides_data if x['status'] == 'Added']
+    cancelled = [x['session_date'] for x in overrides_data if x['status'] == 'Cancelled']
+    
     today = datetime.now()
-    days_ahead = 0
-    while True:
-        candidate = today + timedelta(days=days_ahead)
-        if candidate.weekday() in [3, 6]:
-            return candidate.strftime("%b %d")
-        days_ahead += 1
+    candidate_dates = []
+    
+    for i in range(21): # the next 21 days of standard Sun/Thu practices
+        d = today + timedelta(days=i)
+        if d.weekday() in [3, 6]:
+            candidate_dates.append(d.strftime("%b %d"))
+            
+    candidate_dates.extend(added) # any custom added dates
+    
+    def sort_key(date_str):
+        try: 
+            return datetime.strptime(f"{date_str} {today.year}", "%b %d %Y")
+        except: 
+            return datetime.max
+            
+    # Deduplicate, filter out cancellations, and sort
+    valid_dates = list(set([d for d in candidate_dates if d not in cancelled]))
+    valid_dates.sort(key=sort_key)
+    
+    future_dates = [d for d in valid_dates if sort_key(d).date() >= today.date()]
+    return future_dates
+
+def get_next_session_date(overrides_data):
+    future_dates = get_upcoming_sessions_list(overrides_data)
+    if future_dates:
+        return future_dates[0]
+    return datetime.now().strftime("%b %d")
 
 def calculate_streaks(df):
     if df.empty or 'status' not in df.columns or 'player' not in df.columns: 

@@ -62,9 +62,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 
-# THEME AND SIDEBAR SETUP
 with st.sidebar:
-    # CHANGED: Headline color from green to white
     st.markdown("<div style='display: flex; flex-direction: column;'><h2 style='color: #ffffff; font-weight: 800; margin: 0; padding: 0;'>JVC</h2><span style='color: #6b7280; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;'>Team Hub</span></div>", unsafe_allow_html=True)
     st.divider()
     
@@ -90,7 +88,7 @@ with st.sidebar:
     light_mode = st.toggle("Light Mode UI", value=False)
     
     if st.session_state.role == "Coach":
-        nav = st.radio("Menu", ["Admin", "Finances"], label_visibility="collapsed")
+        nav = st.radio("Menu", ["Admin", "Finances", "Session Manager"], label_visibility="collapsed")
     else:
         nav = st.radio("Menu", ["Dashboard", "My Stats"], label_visibility="collapsed")
         current_user = st.session_state.user_name
@@ -197,3 +195,5 @@ elif nav == "Admin" and st.session_state.role == "Coach":
     views.render_admin()
 elif nav == "Finances" and st.session_state.role == "Coach":
     views.render_finances(SHOW_PAYMENT_HISTORY_REPORT)
+elif nav == "Session Manager" and st.session_state.role == "Coach":
+    views.render_session_manager()
