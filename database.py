@@ -85,26 +85,48 @@ def load_payment_history():
 
 def save_attendance(player_name, new_status, target_date=None):
     if not target_date: target_date = get_next_session_date()
+    
+    status_costs = {
+        "Unavailable": 0,
+        "Available": 1,
+        "Double Session": 2
+    }
+    
     try:
         existing = conn.table("attendance").select("*").eq("player", player_name).eq("date", target_date).execute()
+        current_sessions = load_player_credits(player_name)
+        
         if existing.data:
             old_status = existing.data[0]['status']
-            if old_status == new_status: return False
-                
-            current_sessions = load_player_credits(player_name)
-            if new_status == "Available" and old_status == "Unavailable":
-                conn.table("player_credits").upsert({"player": player_name, "remaining_sessions": current_sessions - 1}).execute()
-            elif new_status == "Unavailable" and old_status == "Available":
-                conn.table("player_credits").upsert({"player": player_name, "remaining_sessions": current_sessions + 1}).execute()
+            if old_status == new_status: 
+                return False
+            
+            # calc the difference in cost between the old and new status
+            old_cost = status_costs.get(old_status, 0)
+            new_cost = status_costs.get(new_status, 0)
+            ticket_difference = new_cost - old_cost
+            
+            # deduct or refund the difference
+            conn.table("player_credits").upsert({
+                "player": player_name, 
+                "remaining_sessions": current_sessions - ticket_difference
+            }).execute()
             
             conn.table("attendance").update({"status": new_status}).eq("player", player_name).eq("date", target_date).execute()
             return True
+            
         else:
-            if new_status == "Available":
-                current_sessions = load_player_credits(player_name)
-                conn.table("player_credits").upsert({"player": player_name, "remaining_sessions": current_sessions - 1}).execute()
+            # بirst time setting attendance for this date
+            new_cost = status_costs.get(new_status, 0)
+            if new_cost > 0:
+                conn.table("player_credits").upsert({
+                    "player": player_name, 
+                    "remaining_sessions": current_sessions - new_cost
+                }).execute()
+                
             conn.table("attendance").insert({"player": player_name, "status": new_status, "date": target_date}).execute()
             return True
+            
     except Exception as e:
         st.error(f"DB Error: {e}")
         return False

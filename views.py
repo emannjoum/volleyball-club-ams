@@ -43,7 +43,13 @@ def render_player_dashboard(current_user, radar_label_color):
                 st.markdown(f"Your locked-in status is: **<span style='color:red'>Unavailable</span>**", unsafe_allow_html=True)
         else:
             st.write("Let the coach know if you will be on the court.")
-            
+
+        status = st.segmented_control("Your Status", ["Available", "Double Session", "Unavailable"], default=current_status if current_status else "Available")
+        if st.button("Update Status", use_container_width=True):
+            if db.save_attendance(current_user, status, next_session):
+                st.success(f"Status locked in for {next_session}")
+                st.rerun()
+                 
         status = st.segmented_control("Your Status", ["Available", "Unavailable"], default=current_status if current_status else "Available")
         if st.button("Update Status", use_container_width=True):
             if db.save_attendance(current_user, status, next_session):
@@ -134,12 +140,15 @@ def render_player_stats(current_user, grid_empty):
         sorted_data = user_data.sort_values('created_at') if 'created_at' in user_data.columns else user_data
         squares_html = "<div style='display: flex; flex-wrap: wrap; gap: 4px; padding-top: 10px;'>"
         for idx, row in sorted_data.iterrows():
-            color = "#166534" if row['status'] == 'Available' else grid_empty
+            if row['status'] == 'Available':
+                color = "#166534"
+            elif row['status'] == 'Double Session':
+                color = "#10b981" 
+            else:
+                color = grid_empty
             squares_html += f"<div class='activity-square' title='{row['date']} - {row['status']}' style='width: 18px; height: 18px; background-color: {color}; border-radius: 3px;'></div>"
         squares_html += "</div>"
         st.markdown(squares_html, unsafe_allow_html=True)
-    else:
-        st.info("No attendance records found.")
 
 def render_admin():
     st.markdown("<h1 class='gradient-text'>Coach Admin</h1>", unsafe_allow_html=True)
@@ -206,6 +215,7 @@ def render_admin():
                 
                 def color_matrix(val):
                     if val == 'Available': return 'background-color: #bbf7d0; color: #166534'
+                    elif val == 'Double Session': return 'background-color: #86efac; color: #065f46; font-weight: bold'
                     elif val == 'Unavailable': return 'background-color: #fecaca; color: #991b1b'
                     return ''
                 
