@@ -280,10 +280,19 @@ def render_admin():
             st.markdown(_stat_card("ATTENDING", len(in_players), "#6366F1"), unsafe_allow_html=True)
         with col_names:
             if in_players:
+                # the players' pills
                 pills_html = "<div class='player-pill-row'>" + "".join(
                     f"<span class='player-pill'>{p}</span>" for p in in_players
                 ) + "</div>"
                 st.markdown(pills_html, unsafe_allow_html=True)
+                
+                whatsapp_header = f"🏐 Practice — {upcoming_date}\n" # for WhatsApp msg of coach 
+
+                whatsapp_names = "\n".join([f"{i+1}. {p}" for i, p in enumerate(in_players)])
+                full_roster_text = whatsapp_header + whatsapp_names
+                
+                st.markdown("<p style='font-size:0.75rem; color:#64748B; margin-top:0.8rem; margin-bottom:0.2rem; text-transform:uppercase; letter-spacing:0.05em;'>Copy List for WhatsApp</p>", unsafe_allow_html=True)
+                st.code(full_roster_text, language=None) # copy button
             else:
                 st.markdown("<p class='helper-text'>No players confirmed yet.</p>", unsafe_allow_html=True)
 
