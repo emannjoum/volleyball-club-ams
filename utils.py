@@ -52,7 +52,7 @@ def calculate_streaks(df):
         max_streak = 0
         current_streak = 0
         for status in p_df['status']:
-            if status == "Available":
+            if status == "In":
                 current_streak += 1
                 if current_streak > max_streak: 
                     max_streak = current_streak
